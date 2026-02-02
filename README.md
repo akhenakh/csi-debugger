@@ -2,6 +2,8 @@
 
 A Container Storage Interface (CSI) driver designed for debugging and testing secret storage workflows in Kubernetes.
 
+![UI](./img/ui.png)
+
 ## Overview
 
 The CSI Secret Debugger is a specialized CSI driver that helps developers debug and test secret storage implementations. It provides visibility into how secrets are mounted, accessed, and managed within Kubernetes pods through CSI volumes.
