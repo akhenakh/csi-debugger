@@ -1,0 +1,99 @@
+# Secret Provider CSI Driver Deployment
+# Note: This is a secret provider, NOT a standard CSI driver
+# It implements the secrets-store-csi-driver provider interface (Mount/Version)
+# NOT the standard CSI Identity/Controller/Node interfaces
+
+# Service Account & RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: csi-driver-sa
+  namespace: kube-system
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-driver-role
+rules:
+  # Secret providers don't need storage API access
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-driver-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-driver-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-driver-role
+  apiGroup: rbac.authorization.k8s.io
+
+# DaemonSet
+# Note: No node-driver-registrar - this is a secrets provider, not a CSI driver
+# The secrets-store-csi-driver (separate component) handles CSI registration
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-node
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: csi-node
+  template:
+    metadata:
+      labels:
+        app: csi-node
+    spec:
+      serviceAccountName: csi-driver-sa
+      hostNetwork: true
+      containers:
+        - name: csi-driver
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          image: ghcr.io/akhenakh/csi-debugger:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+              name: http-admin
+              protocol: TCP
+          env:
+            - name: SOCKET_PATH
+              value: /csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: LOG_LEVEL
+              value: DEBUG
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi-debugger-driver.csi.k8s.io/
+            type: DirectoryOrCreate
+
+# Service to expose the HTTP admin interface
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csi-driver-admin
+  namespace: kube-system
+spec:
+  selector:
+    app: csi-node
+  ports:
+    - port: 8090
+      targetPort: 8090
+      name: http-admin
+  type: NodePort
