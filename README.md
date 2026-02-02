@@ -37,13 +37,78 @@ kubectl apply -f deploy/
 go build -o csi-debugger 
 ```
 
+## Usage Example
+
+Here's a complete example of using the CSI Debugger to mount secrets into a pod:
+
+### 1. Create a SecretProviderClass
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: csi-debugger-spc
+  namespace: default
+spec:
+  provider: csidebugger
+  parameters:
+    debug: "true"
+```
+
+### 2. Deploy a Pod with Secrets
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secret-test-pod
+  namespace: default
+spec:
+  containers:
+  - name: test-container
+    image: busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+    volumeMounts:
+    - name: secrets-volume
+      mountPath: /mnt/secrets
+      readOnly: true
+  volumes:
+  - name: secrets-volume
+    csi:
+      driver: secrets-store.csi.k8s.io
+      readOnly: true
+      volumeAttributes:
+        secretProviderClass: csi-debugger-spc
+```
+
+### 3. Add Secrets via the Admin UI
+
+Once the driver is deployed, you can add secrets through the HTTP admin interface:
+
+```bash
+# Port-forward to access the admin UI
+kubectl port-forward -n kube-system svc/csi-driver-admin 8090:8090
+```
+
+Then open http://localhost:8090 in your browser and add secrets. Any secrets you add will be mounted into pods using the `csi-debugger-spc` SecretProviderClass.
+
+### 4. Verify Secrets in the Pod
+
+```bash
+# Check what files are mounted
+kubectl exec secret-test-pod -- ls -la /mnt/secrets
+
+# Read a secret file
+kubectl exec secret-test-pod -- cat /mnt/secrets/my-secret.txt
+```
+
 ## Configuration
 
 The driver can be configured through command-line flags:
 
 - `--endpoint`: CSI socket endpoint (default: `unix:///csi/csi.sock`)
 - `--nodeid`: Node ID for the driver instance
-- `--driver-name`: CSI driver name (default: `csi-debugger-driver.csi.k8s.io`)
+- `--driver-name`: CSI driver name (default: `csidebugger`)
 
 ## E2E Testing
 
@@ -62,9 +127,9 @@ kubectl port-forward -n kube-system svc/csi-driver-admin 8090:8090
 
 ### What the E2E Test Does
 
-*   **StorageClass Creation**: Creates a StorageClass programmatically (Go struct) instead of reading a YAML file.
-*   **VolumeBindingMode Handling**: Uses `WaitForFirstConsumer` to ensure the PV creates on the specific node where the Pod is scheduled, which is critical for many CSI drivers (like local storage or hostpath).
-*   **Persistence Verification**: Performs a **Write -> Delete -> Recreate -> Read** cycle to prove that data was actually stored on the backend volume, not just in the Pod's ephemeral layer.
+*   **Provider Registration**: Deploys the CSI debugger provider and ensures it's correctly registered with the secrets-store-csi-driver.
+*   **Secret Mounting**: Creates a SecretProviderClass and deploys a pod with a CSI volume mount to validate secrets are correctly mounted.
+*   **End-to-End Validation**: Uses the admin API to add secrets, then verifies they are accessible from within the mounted pod.
 *   **Resource Cleanup**: Uses `defer` to clean up resources, ensuring your cluster is ready for the next test run even if this one fails.
 
 

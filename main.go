@@ -394,6 +394,15 @@ func startGRPCServer(ctx context.Context, logger *slog.Logger, cfg Config, store
 		return fmt.Errorf("gRPC server failed to listen on unix socket: %w", err)
 	}
 
+	// Set socket permissions to allow any user to connect (required for secrets-store-csi-driver)
+	// Using 0777 to ensure read, write, and execute permissions for all users
+	if err := os.Chmod(cfg.SocketPath, 0777); err != nil {
+		logger.Error("failed to set socket permissions", "error", err)
+		// Don't fail, just log the error
+	} else {
+		logger.Info("set socket permissions to 0777")
+	}
+
 	grpcServer := grpc.NewServer()
 	providerSrv := &ProviderServer{store: store, logger: logger}
 
